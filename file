@@ -1,113 +1,7 @@
-source /opt/airflow/venv/bin/activate
+sudo nano /etc/systemd/system/airflow-webserver.service
 
-pip uninstall -y openmetadata-managed-apis openmetadata-ingestion
-pip install --no-cache-dir --force-reinstall "openmetadata-ingestion[all]==1.12.1"
-pip install --no-cache-dir --force-reinstall "openmetadata-managed-apis==1.12.1"
-pip check
+Use:
 
-
-**************
-sudo systemctl stop airflow-webserver || true
-sudo systemctl stop airflow-scheduler || true
-sudo systemctl stop airflow-worker || true
-
-sudo mkdir -p /root/airflow-backup
-sudo cp -a /opt/airflow/dags /root/airflow-backup/ 2>/dev/null || true
-sudo cp -a /opt/airflow/airflow.cfg /root/airflow-backup/ 2>/dev/null || true
-
-
-sudo rm -rf /opt/airflow/venv
-
-sudo apt-get update
-sudo apt-get install -y \
-  python3.11 python3.11-venv python3.11-dev \
-  build-essential gcc g++ \
-  libpq-dev \
-  unixodbc unixodbc-dev \
-  libsasl2-dev libssl-dev libffi-dev \
-  curl
-
-
-sudo groupadd --system airflow 2>/dev/null || true
-sudo useradd --system --gid airflow --home-dir /opt/airflow --shell /bin/bash airflow 2>/dev/null || true
-
-sudo mkdir -p /opt/airflow
-sudo mkdir -p /opt/airflow/dags
-sudo mkdir -p /opt/airflow/logs
-sudo mkdir -p /opt/airflow/plugins
-sudo mkdir -p /opt/airflow/dag_generated_configs
-
-sudo chown -R airflow:airflow /opt/airflow
-sudo chmod -R 755 /opt/airflow
-
-
-sudo -u airflow python3.11 -m venv /opt/airflow/venv
-sudo -u airflow /opt/airflow/venv/bin/pip install --upgrade pip setuptools wheel
-
-
-sudo -u airflow -H bash
-
-
-export AIRFLOW_HOME=/opt/airflow
-export AIRFLOW_VERSION=2.10.5
-export PYTHON_VERSION=3.11
-export OPENMETADATA_VERSION=1.12.1
-export CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
-source /opt/airflow/venv/bin/activate
-
-
-pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
-
-
-pip install "openmetadata-ingestion[postgres,mysql,mssql,mssql-odbc,elasticsearch,opensearch]==${OPENMETADATA_VERSION}"
-pip install "openmetadata-managed-apis==${OPENMETADATA_VERSION}"
-
-
-***************
-
-
-sudo tee /etc/default/airflow >/dev/null <<'EOF'
-AIRFLOW_HOME=/opt/airflow
-AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
-AIRFLOW__CORE__LOAD_EXAMPLES=False
-
-AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:change-me@10.10.25.42:5432/airflow
-
-AIRFLOW__WEBSERVER__WEB_SERVER_HOST=0.0.0.0
-AIRFLOW__WEBSERVER__WEB_SERVER_PORT=8080
-AIRFLOW__WEBSERVER__SECRET_KEY=change-this-secret
-
-AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
-AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS=/opt/airflow/dag_generated_configs
-EOF
-
-
-source /opt/airflow/venv/bin/activate
-pip install psycopg2-binary
-pip check
-export AIRFLOW_HOME=/opt/airflow
-airflow db migrate
-airflow db migrate
-
-or airflow db init
-
-
-airflow users create \
-  --username admin \
-  --password 'change-me' \
-  --firstname Admin \
-  --lastname User \
-  --role Admin \
-  --email admin@example.com
-
-
-airflow config get-value openmetadata_airflow_apis dag_generated_configs
-
-***********
-
-
-
-sudo tee /etc/systemd/system/airflow-webserver.service >/dev/null <<'EOF'
 [Unit]
 Description=Airflow webserver
 After=network.target
@@ -117,19 +11,19 @@ EnvironmentFile=/etc/default/airflow
 User=airflow
 Group=airflow
 Type=simple
-ExecStart=/opt/airflow/venv/bin/airflow webserver
+ExecStart=/opt/airflow/venv/bin/python -m airflow webserver
 Restart=always
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
-EOF
 
+Do the same for scheduler:
 
+sudo nano /etc/systemd/system/airflow-scheduler.service
 
-************
+Use:
 
-sudo tee /etc/systemd/system/airflow-scheduler.service >/dev/null <<'EOF'
 [Unit]
 Description=Airflow scheduler
 After=network.target
@@ -139,33 +33,17 @@ EnvironmentFile=/etc/default/airflow
 User=airflow
 Group=airflow
 Type=simple
-ExecStart=/opt/airflow/venv/bin/airflow scheduler
+ExecStart=/opt/airflow/venv/bin/python -m airflow scheduler
 Restart=always
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
-EOF
 
-
+Then reload and restart:
 
 sudo systemctl daemon-reload
-sudo systemctl enable airflow-webserver
-sudo systemctl enable airflow-scheduler
-sudo systemctl start airflow-webserver
-sudo systemctl start airflow-scheduler
-
-
-sudo journalctl -u airflow-webserver -n 100 --no-pager
-
-and also:
-
-sudo systemctl status airflow-webserver -l --no-pager
-
-That will show the actual Python traceback.
-
-Also test the command manually outside systemd, because that usually exposes the error faster:
-
-source /opt/airflow/venv/bin/activate
-export AIRFLOW_HOME=/opt/airflow
-airflow webserver
+sudo systemctl restart airflow-webserver
+sudo systemctl restart airflow-scheduler
+sudo systemctl status airflow-webserver --no-pager
+sudo systemctl status airflow-scheduler --no-pager
