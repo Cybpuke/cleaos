@@ -1,9 +1,20 @@
-sudo -u airflow /opt/airflow/venv/bin/pip install "click>=7.0,<8.1.4"
-Step 2: Reinstall the ingestion package to repair any other broken deps:
+sudo -u airflow /opt/airflow/venv/bin/pip install \
+  "apache-airflow[postgres]==2.10.5" \
+  --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.5/constraints-3.11.txt"
 
-bash
-sudo -u airflow /opt/airflow/venv/bin/pip install "openmetadata-ingestion[postgres,mysql,mssql,mssql-odbc,elasticsearch,opensearch]==1.12.1"
-Step 3: Restart Airflow:
+# 2. Reinstall OpenMetadata packages
+sudo -u airflow /opt/airflow/venv/bin/pip install --force-reinstall \
+  "openmetadata-ingestion[postgres,mysql,mssql,mssql-odbc,elasticsearch,opensearch]==1.12.1"
 
-bash
+sudo -u airflow /opt/airflow/venv/bin/pip install --force-reinstall \
+  "openmetadata-managed-apis==1.12.1"
+
+# 3. Install presidio LAST, then pin click
+sudo -u airflow /opt/airflow/venv/bin/pip install presidio-analyzer
+sudo -u airflow /opt/airflow/venv/bin/pip install "click>=8.0,<8.1.4"
+
+# 4. Fix setuptools and cachetools
+sudo -u airflow /opt/airflow/venv/bin/pip install "setuptools>=78.1,<81" "packaging>=24.2" cachetools
+
+# 5. Restart
 sudo systemctl restart airflow-webserver airflow-scheduler
