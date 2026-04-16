@@ -1,20 +1,15 @@
-sudo -u airflow /opt/airflow/venv/bin/pip install \
-  "apache-airflow[postgres]==2.10.5" \
-  --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.5/constraints-3.11.txt"
+source /opt/airflow/venv/bin/activate
 
-# 2. Reinstall OpenMetadata packages
-sudo -u airflow /opt/airflow/venv/bin/pip install --force-reinstall \
-  "openmetadata-ingestion[postgres,mysql,mssql,mssql-odbc,elasticsearch,opensearch]==1.12.1"
+pip uninstall -y openmetadata-ingestion openmetadata-managed-apis apache-airflow
 
-sudo -u airflow /opt/airflow/venv/bin/pip install --force-reinstall \
-  "openmetadata-managed-apis==1.12.1"
+pip cache purge
 
-# 3. Install presidio LAST, then pin click
-sudo -u airflow /opt/airflow/venv/bin/pip install presidio-analyzer
-sudo -u airflow /opt/airflow/venv/bin/pip install "click>=8.0,<8.1.4"
+pip install --upgrade pip setuptools wheel
 
-# 4. Fix setuptools and cachetools
-sudo -u airflow /opt/airflow/venv/bin/pip install "setuptools>=78.1,<81" "packaging>=24.2" cachetools
+export AIRFLOW_VERSION=2.10.5
+export PYTHON_VERSION=3.11
+export CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
 
-# 5. Restart
-sudo systemctl restart airflow-webserver airflow-scheduler
+pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
+pip install "openmetadata-managed-apis==1.12.1"
+pip install "openmetadata-ingestion[postgres,mysql,mssql,mssql-odbc,elasticsearch,opensearch]==1.12.1"
