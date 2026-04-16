@@ -1,3 +1,24 @@
+AIRFLOW_HOME=/opt/airflow
+AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+AIRFLOW__CORE__LOAD_EXAMPLES=False
+
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow_password@10.10.25.42:5432/airflow_db
+
+AIRFLOW__WEBSERVER__WEB_SERVER_HOST=0.0.0.0
+AIRFLOW__WEBSERVER__WEB_SERVER_PORT=8080
+AIRFLOW__WEBSERVER__SECRET_KEY=change-this-secret
+
+AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS=/opt/airflow/dag_generated_configs
+
+
+
+
+
+
+
+
+**************
 sudo systemctl stop airflow-webserver || true
 sudo systemctl stop airflow-scheduler || true
 sudo systemctl stop airflow-worker || true
