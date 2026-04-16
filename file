@@ -1,2 +1,16 @@
-sudo -u airflow /opt/airflow/venv/bin/pip install presidio-analyzer
-sudo systemctl restart airflow-scheduler airflow-webserver
+odbcinst -q -d
+You should see [ODBC Driver 18 for SQL Server] or similar. If it's missing, install it:
+
+bash
+curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+sudo apt-get update
+sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+2. Test the connection manually from Airflow
+bash
+sudo -u airflow /opt/airflow/venv/bin/python -c "
+import pymssql
+conn = pymssql.connect(server='YOUR_MSSQL_HOST', user='YOUR_USER', password='YOUR_PASSWORD', database='webDB')
+print('Connection OK')
+conn.close()
+"
