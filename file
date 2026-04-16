@@ -52,3 +52,96 @@ pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}
 
 pip install "openmetadata-ingestion[postgres,mysql,mssql,mssql-odbc,elasticsearch,opensearch]==${OPENMETADATA_VERSION}"
 pip install "openmetadata-managed-apis==${OPENMETADATA_VERSION}"
+
+
+***************
+
+
+sudo tee /etc/default/airflow >/dev/null <<'EOF'
+AIRFLOW_HOME=/opt/airflow
+AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+AIRFLOW__CORE__LOAD_EXAMPLES=False
+
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:change-me@10.10.25.42:5432/airflow
+
+AIRFLOW__WEBSERVER__WEB_SERVER_HOST=0.0.0.0
+AIRFLOW__WEBSERVER__WEB_SERVER_PORT=8080
+AIRFLOW__WEBSERVER__SECRET_KEY=change-this-secret
+
+AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS=/opt/airflow/dag_generated_configs
+EOF
+
+
+export AIRFLOW_HOME=/opt/airflow
+source /opt/airflow/venv/bin/activate
+
+airflow db migrate
+
+or airflow db init
+
+
+airflow users create \
+  --username admin \
+  --password 'change-me' \
+  --firstname Admin \
+  --lastname User \
+  --role Admin \
+  --email admin@example.com
+
+
+airflow config get-value openmetadata_airflow_apis dag_generated_configs
+
+***********
+
+
+
+sudo tee /etc/systemd/system/airflow-webserver.service >/dev/null <<'EOF'
+[Unit]
+Description=Airflow webserver
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/default/airflow
+User=airflow
+Group=airflow
+Type=simple
+ExecStart=/opt/airflow/venv/bin/airflow webserver
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+
+
+************
+
+sudo tee /etc/systemd/system/airflow-scheduler.service >/dev/null <<'EOF'
+[Unit]
+Description=Airflow scheduler
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/default/airflow
+User=airflow
+Group=airflow
+Type=simple
+ExecStart=/opt/airflow/venv/bin/airflow scheduler
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable airflow-webserver
+sudo systemctl enable airflow-scheduler
+sudo systemctl start airflow-webserver
+sudo systemctl start airflow-scheduler
+
+
