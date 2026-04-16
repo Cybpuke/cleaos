@@ -147,3 +147,16 @@ sudo systemctl start airflow-webserver
 sudo systemctl start airflow-scheduler
 
 
+sudo journalctl -u airflow-webserver -n 100 --no-pager
+
+and also:
+
+sudo systemctl status airflow-webserver -l --no-pager
+
+That will show the actual Python traceback.
+
+Also test the command manually outside systemd, because that usually exposes the error faster:
+
+source /opt/airflow/venv/bin/activate
+export AIRFLOW_HOME=/opt/airflow
+airflow webserver
