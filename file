@@ -1,49 +1,344 @@
-sudo nano /etc/systemd/system/airflow-webserver.service
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-Use:
+########################################
+# OpenMetadata 1.12.1 + Airflow 2.10.5
+# Clean reinstall for host 10.10.25.43
+# No reboot required
+########################################
 
+########################################
+# Variables - adjust only if needed
+########################################
+OPENMETADATA_VERSION="1.12.1"
+AIRFLOW_VERSION="2.10.5"
+PYTHON_VERSION="3.11"
+
+AIRFLOW_USER="airflow"
+AIRFLOW_GROUP="airflow"
+AIRFLOW_HOME="/opt/airflow"
+AIRFLOW_VENV="/opt/airflow/venv"
+
+AIRFLOW_HOST="10.10.25.43"
+AIRFLOW_LISTEN_HOST="0.0.0.0"
+AIRFLOW_PORT="8080"
+
+AIRFLOW_DB_HOST="10.10.25.42"
+AIRFLOW_DB_PORT="5432"
+AIRFLOW_DB_NAME="airflow_db"
+AIRFLOW_DB_USER="airflow"
+AIRFLOW_DB_PASSWORD="airflow_password"
+
+AIRFLOW_ADMIN_USER="admin"
+AIRFLOW_ADMIN_PASSWORD="admin"
+AIRFLOW_ADMIN_FIRSTNAME="Admin"
+AIRFLOW_ADMIN_LASTNAME="User"
+AIRFLOW_ADMIN_EMAIL="admin@example.com"
+
+AIRFLOW_WEBSERVER_SECRET_KEY="change-this-secret"
+
+# Safer than [all] after your dependency conflicts.
+# If you truly want all, set INSTALL_OM_ALL="true"
+INSTALL_OM_ALL="false"
+OM_EXTRAS="postgres,mysql,mssql,mssql-odbc,elasticsearch,opensearch"
+
+# Backup path
+BACKUP_DIR="/opt/metadata-backup/airflow-$(date +%F-%H%M%S)"
+
+# Official Airflow constraints URL pattern
+CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt"
+
+########################################
+# Helpers
+########################################
+log() {
+  echo
+  echo "========== $* =========="
+}
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+require_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    die "Run this script as root."
+  fi
+}
+
+cmd_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+########################################
+# Preflight
+########################################
+require_root
+
+log "Preflight checks"
+
+if ! cmd_exists python3.11; then
+  die "python3.11 is not installed. Install Python 3.11 first."
+fi
+
+if ! getent passwd "${AIRFLOW_USER}" >/dev/null 2>&1; then
+  useradd --system --gid "${AIRFLOW_GROUP}" --home-dir "${AIRFLOW_HOME}" --shell /bin/bash "${AIRFLOW_USER}" || true
+fi
+
+if ! getent group "${AIRFLOW_GROUP}" >/dev/null 2>&1; then
+  groupadd --system "${AIRFLOW_GROUP}" || true
+fi
+
+mkdir -p "${BACKUP_DIR}"
+
+########################################
+# Stop services
+########################################
+log "Stopping existing Airflow services"
+systemctl stop airflow-webserver 2>/dev/null || true
+systemctl stop airflow-scheduler 2>/dev/null || true
+
+########################################
+# Backup current Airflow data
+########################################
+log "Backing up current Airflow files to ${BACKUP_DIR}"
+mkdir -p "${BACKUP_DIR}"
+
+if [[ -d "${AIRFLOW_HOME}" ]]; then
+  cp -a "${AIRFLOW_HOME}/dags" "${BACKUP_DIR}/" 2>/dev/null || true
+  cp -a "${AIRFLOW_HOME}/plugins" "${BACKUP_DIR}/" 2>/dev/null || true
+  cp -a "${AIRFLOW_HOME}/airflow.cfg" "${BACKUP_DIR}/" 2>/dev/null || true
+  cp -a "${AIRFLOW_HOME}/dag_generated_configs" "${BACKUP_DIR}/" 2>/dev/null || true
+fi
+
+########################################
+# OS packages
+########################################
+log "Installing OS dependencies"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y \
+  python3.11 python3.11-venv python3.11-dev \
+  build-essential gcc g++ \
+  curl ca-certificates \
+  libpq-dev postgresql-client \
+  unixodbc unixodbc-dev \
+  libsasl2-dev libssl-dev libffi-dev
+
+########################################
+# Create directories
+########################################
+log "Preparing Airflow directories"
+mkdir -p "${AIRFLOW_HOME}"/{dags,logs,plugins,dag_generated_configs}
+chown -R "${AIRFLOW_USER}:${AIRFLOW_GROUP}" "${AIRFLOW_HOME}"
+chmod -R 755 "${AIRFLOW_HOME}"
+
+########################################
+# Remove and recreate venv
+########################################
+log "Recreating virtual environment"
+rm -rf "${AIRFLOW_VENV}"
+sudo -u "${AIRFLOW_USER}" python3.11 -m venv "${AIRFLOW_VENV}"
+
+# Upgrade packaging tools
+sudo -u "${AIRFLOW_USER}" "${AIRFLOW_VENV}/bin/pip" install --upgrade pip setuptools wheel
+
+########################################
+# Install Airflow with constraints
+########################################
+log "Installing Airflow ${AIRFLOW_VERSION} with official constraints"
+sudo -u "${AIRFLOW_USER}" env \
+  AIRFLOW_HOME="${AIRFLOW_HOME}" \
+  "${AIRFLOW_VENV}/bin/pip" install \
+  "apache-airflow[postgres]==${AIRFLOW_VERSION}" \
+  --constraint "${CONSTRAINT_URL}"
+
+########################################
+# Install OpenMetadata Airflow-side packages
+########################################
+log "Installing OpenMetadata Airflow-side packages"
+
+if [[ "${INSTALL_OM_ALL}" == "true" ]]; then
+  sudo -u "${AIRFLOW_USER}" env \
+    AIRFLOW_HOME="${AIRFLOW_HOME}" \
+    "${AIRFLOW_VENV}/bin/pip" install \
+    "openmetadata-ingestion[all]==${OPENMETADATA_VERSION}"
+else
+  sudo -u "${AIRFLOW_USER}" env \
+    AIRFLOW_HOME="${AIRFLOW_HOME}" \
+    "${AIRFLOW_VENV}/bin/pip" install \
+    "openmetadata-ingestion[${OM_EXTRAS}]==${OPENMETADATA_VERSION}"
+fi
+
+sudo -u "${AIRFLOW_USER}" env \
+  AIRFLOW_HOME="${AIRFLOW_HOME}" \
+  "${AIRFLOW_VENV}/bin/pip" install \
+  "openmetadata-managed-apis==${OPENMETADATA_VERSION}"
+
+########################################
+# Verify python packages
+########################################
+log "Running package sanity checks"
+sudo -u "${AIRFLOW_USER}" "${AIRFLOW_VENV}/bin/pip" check
+
+sudo -u "${AIRFLOW_USER}" "${AIRFLOW_VENV}/bin/python" - <<'PY'
+import sys
+import metadata
+import openmetadata_managed_apis
+print("metadata module:", metadata.__file__)
+print("openmetadata_managed_apis module:", openmetadata_managed_apis.__file__)
+PY
+
+########################################
+# Write Airflow environment file
+########################################
+log "Writing /etc/default/airflow"
+cat >/etc/default/airflow <<EOF
+AIRFLOW_HOME=${AIRFLOW_HOME}
+AIRFLOW__CORE__DAGS_FOLDER=${AIRFLOW_HOME}/dags
+AIRFLOW__CORE__LOAD_EXAMPLES=False
+
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@${AIRFLOW_DB_HOST}:${AIRFLOW_DB_PORT}/${AIRFLOW_DB_NAME}
+
+AIRFLOW__WEBSERVER__WEB_SERVER_HOST=${AIRFLOW_LISTEN_HOST}
+AIRFLOW__WEBSERVER__WEB_SERVER_PORT=${AIRFLOW_PORT}
+AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW_WEBSERVER_SECRET_KEY}
+
+AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS=${AIRFLOW_HOME}/dag_generated_configs
+
+# Helps with plugin registration consistency
+AIRFLOW__CORE__LAZY_LOAD_PLUGINS=False
+AIRFLOW__WEBSERVER__RELOAD_ON_PLUGIN_CHANGE=False
+EOF
+
+chmod 600 /etc/default/airflow
+
+########################################
+# Fix ownership after installs
+########################################
+log "Fixing ownership"
+chown -R "${AIRFLOW_USER}:${AIRFLOW_GROUP}" "${AIRFLOW_HOME}"
+
+########################################
+# Validate DB connectivity before migrate
+########################################
+log "Testing PostgreSQL connectivity"
+PGPASSWORD="${AIRFLOW_DB_PASSWORD}" psql \
+  -h "${AIRFLOW_DB_HOST}" \
+  -p "${AIRFLOW_DB_PORT}" \
+  -U "${AIRFLOW_DB_USER}" \
+  -d "${AIRFLOW_DB_NAME}" \
+  -c '\conninfo' >/dev/null
+
+########################################
+# Initialize/migrate Airflow DB
+########################################
+log "Running airflow db migrate"
+sudo -u "${AIRFLOW_USER}" env \
+  AIRFLOW_HOME="${AIRFLOW_HOME}" \
+  "${AIRFLOW_VENV}/bin/python" -m airflow db migrate
+
+########################################
+# Create admin user if missing
+########################################
+log "Ensuring admin user exists"
+set +e
+sudo -u "${AIRFLOW_USER}" env \
+  AIRFLOW_HOME="${AIRFLOW_HOME}" \
+  "${AIRFLOW_VENV}/bin/python" -m airflow users create \
+  --username "${AIRFLOW_ADMIN_USER}" \
+  --password "${AIRFLOW_ADMIN_PASSWORD}" \
+  --firstname "${AIRFLOW_ADMIN_FIRSTNAME}" \
+  --lastname "${AIRFLOW_ADMIN_LASTNAME}" \
+  --role Admin \
+  --email "${AIRFLOW_ADMIN_EMAIL}"
+rc=$?
+set -e
+
+if [[ $rc -ne 0 ]]; then
+  echo "Admin user may already exist. Continuing."
+fi
+
+########################################
+# Validate plugin path config
+########################################
+log "Validating OpenMetadata Airflow config section"
+sudo -u "${AIRFLOW_USER}" env \
+  AIRFLOW_HOME="${AIRFLOW_HOME}" \
+  "${AIRFLOW_VENV}/bin/python" -m airflow config get-value openmetadata_airflow_apis dag_generated_configs
+
+########################################
+# systemd service files
+########################################
+log "Writing systemd units"
+
+cat >/etc/systemd/system/airflow-webserver.service <<EOF
 [Unit]
 Description=Airflow webserver
 After=network.target
 
 [Service]
 EnvironmentFile=/etc/default/airflow
-User=airflow
-Group=airflow
+User=${AIRFLOW_USER}
+Group=${AIRFLOW_GROUP}
 Type=simple
-ExecStart=/opt/airflow/venv/bin/python -m airflow webserver
+ExecStart=${AIRFLOW_VENV}/bin/python -m airflow webserver
 Restart=always
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
+EOF
 
-Do the same for scheduler:
-
-sudo nano /etc/systemd/system/airflow-scheduler.service
-
-Use:
-
+cat >/etc/systemd/system/airflow-scheduler.service <<EOF
 [Unit]
 Description=Airflow scheduler
 After=network.target
 
 [Service]
 EnvironmentFile=/etc/default/airflow
-User=airflow
-Group=airflow
+User=${AIRFLOW_USER}
+Group=${AIRFLOW_GROUP}
 Type=simple
-ExecStart=/opt/airflow/venv/bin/python -m airflow scheduler
+ExecStart=${AIRFLOW_VENV}/bin/python -m airflow scheduler
 Restart=always
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
+EOF
 
-Then reload and restart:
+########################################
+# Reload and start services
+########################################
+log "Reloading systemd and starting services"
+systemctl daemon-reload
+systemctl enable airflow-webserver airflow-scheduler
+systemctl restart airflow-webserver
+systemctl restart airflow-scheduler
 
-sudo systemctl daemon-reload
-sudo systemctl restart airflow-webserver
-sudo systemctl restart airflow-scheduler
-sudo systemctl status airflow-webserver --no-pager
-sudo systemctl status airflow-scheduler --no-pager
+sleep 8
+
+########################################
+# Status and validation
+########################################
+log "Service status"
+systemctl --no-pager --full status airflow-webserver || true
+systemctl --no-pager --full status airflow-scheduler || true
+
+log "Airflow version"
+sudo -u "${AIRFLOW_USER}" "${AIRFLOW_VENV}/bin/python" -m airflow version
+
+log "Testing OpenMetadata managed API endpoints"
+set +e
+curl -i -u "${AIRFLOW_ADMIN_USER}:${AIRFLOW_ADMIN_PASSWORD}" "http://${AIRFLOW_HOST}:${AIRFLOW_PORT}/api/v1/openmetadata/health"
+curl -i -u "${AIRFLOW_ADMIN_USER}:${AIRFLOW_ADMIN_PASSWORD}" "http://${AIRFLOW_HOST}:${AIRFLOW_PORT}/api/v1/openmetadata/health-auth"
+set -e
+
+log "Done"
+echo "Backup: ${BACKUP_DIR}"
+echo "If OpenMetadata UI still complains, test from the OM host:"
+echo "curl -i -u ${AIRFLOW_ADMIN_USER}:${AIRFLOW_ADMIN_PASSWORD} http://${AIRFLOW_HOST}:${AIRFLOW_PORT}/api/v1/openmetadata/health"
+echo "curl -i -u ${AIRFLOW_ADMIN_USER}:${AIRFLOW_ADMIN_PASSWORD} http://${AIRFLOW_HOST}:${AIRFLOW_PORT}/api/v1/openmetadata/health-auth"
