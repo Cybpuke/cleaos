@@ -1,0 +1,2 @@
+sudo -u airflow /opt/airflow/venv/bin/pip install presidio-analyzer
+sudo systemctl restart airflow-scheduler airflow-webserver
