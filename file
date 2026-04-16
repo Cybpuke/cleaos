@@ -1,21 +1,9 @@
-AIRFLOW_HOME=/opt/airflow
-AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
-AIRFLOW__CORE__LOAD_EXAMPLES=False
+source /opt/airflow/venv/bin/activate
 
-AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow_password@10.10.25.42:5432/airflow_db
-
-AIRFLOW__WEBSERVER__WEB_SERVER_HOST=0.0.0.0
-AIRFLOW__WEBSERVER__WEB_SERVER_PORT=8080
-AIRFLOW__WEBSERVER__SECRET_KEY=change-this-secret
-
-AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
-AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS=/opt/airflow/dag_generated_configs
-
-
-
-
-
-
+pip uninstall -y openmetadata-managed-apis openmetadata-ingestion
+pip install --no-cache-dir --force-reinstall "openmetadata-ingestion[all]==1.12.1"
+pip install --no-cache-dir --force-reinstall "openmetadata-managed-apis==1.12.1"
+pip check
 
 
 **************
