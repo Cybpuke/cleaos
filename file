@@ -73,9 +73,11 @@ AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS=/opt/airflow/dag_gener
 EOF
 
 
-export AIRFLOW_HOME=/opt/airflow
 source /opt/airflow/venv/bin/activate
-
+pip install psycopg2-binary
+pip check
+export AIRFLOW_HOME=/opt/airflow
+airflow db migrate
 airflow db migrate
 
 or airflow db init
